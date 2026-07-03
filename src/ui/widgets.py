@@ -128,14 +128,20 @@ class ReportListWidget(ttk.Frame):
         """항목 선택 시"""
         selection = self.tree.selection()
         if selection and self.on_select:
-            idx = int(selection[0])
+            try:
+                idx = int(selection[0])
+            except (ValueError, IndexError):
+                return
             self.on_select(idx)
 
     def _on_double_click(self, event):
         """더블클릭 시"""
         selection = self.tree.selection()
         if selection and self.on_double_click:
-            idx = int(selection[0])
+            try:
+                idx = int(selection[0])
+            except (ValueError, IndexError):
+                return
             self.on_double_click(idx)
 
     def set_reports(self, reports: List[ReportData]):
@@ -578,6 +584,8 @@ class AnnotationToolbar(tk.Frame):
         self.on_undo: Optional[Callable] = None
         self.on_clear: Optional[Callable] = None
         self.on_capture: Optional[Callable] = None
+        self.on_auto_highlight_rules: Optional[Callable] = None
+        self.on_auto_highlight_llm: Optional[Callable] = None
 
         self._create_ui()
 
@@ -726,6 +734,22 @@ class AnnotationToolbar(tk.Frame):
                                       command=self._on_capture)
         self.capture_btn.pack(side=tk.LEFT, padx=(0, 4))
 
+        # 구분선
+        tk.Frame(toolbar_inner2, bg=self.colors['border'], width=1, height=24).pack(side=tk.LEFT, padx=12)
+
+        # 자동 하이라이트 버튼 (룰 기반, 항상 활성)
+        self.auto_highlight_btn = ttk.Button(toolbar_inner2, text="🤖 자동 하이라이트",
+                                              style='Accent.TButton',
+                                              command=self._on_auto_highlight_rules)
+        self.auto_highlight_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        # AI 정밀 분석 버튼 (LLM, API 키 있을 때만 활성 - app.py에서 제어)
+        self.ai_highlight_btn = ttk.Button(toolbar_inner2, text="🧠 AI 정밀 분석",
+                                            style='Accent.TButton',
+                                            command=self._on_auto_highlight_llm,
+                                            state='disabled')
+        self.ai_highlight_btn.pack(side=tk.LEFT, padx=(0, 4))
+
         # 현재 도구 상태 표시
         self.tool_status = tk.Label(toolbar_inner2, text="",
                                     bg=self.colors['bg_elevated'],
@@ -847,9 +871,25 @@ class AnnotationToolbar(tk.Frame):
         if self.on_capture:
             self.on_capture()
 
+    def _on_auto_highlight_rules(self):
+        if self.on_auto_highlight_rules:
+            self.on_auto_highlight_rules()
+
+    def _on_auto_highlight_llm(self):
+        if self.on_auto_highlight_llm:
+            self.on_auto_highlight_llm()
+
     def set_undo_enabled(self, enabled: bool):
         """되돌리기 버튼 활성화/비활성화"""
         self.undo_btn.configure(state='normal' if enabled else 'disabled')
+
+    def set_ai_highlight_enabled(self, enabled: bool):
+        """AI 정밀 분석 버튼 활성화/비활성화"""
+        self.ai_highlight_btn.configure(state='normal' if enabled else 'disabled')
+
+    def set_auto_highlight_enabled(self, enabled: bool):
+        """자동 하이라이트 버튼 활성화/비활성화 (분석 중 중복 클릭 방지용)"""
+        self.auto_highlight_btn.configure(state='normal' if enabled else 'disabled')
 
     def reset_tool(self):
         """도구 초기화"""

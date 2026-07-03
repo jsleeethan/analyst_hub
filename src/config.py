@@ -57,6 +57,50 @@ DEFAULT_ALPHA = 77  # 기본값: 30% 불투명
 LINE_WIDTH_OPTIONS = [2, 3, 5, 8]
 DEFAULT_LINE_WIDTH = 3
 
+# 자동 하이라이트 카테고리별 색상
+AUTO_HIGHLIGHT_CATEGORY_COLORS = {
+    'target':    '#FFFF66',  # 노란색 - 목표주가/투자의견
+    'financial': '#90EE90',  # 연한 초록 - 실적/재무 수치
+    'growth':    '#87CEEB',  # 하늘색 - 성장 동력/긍정 요인
+    'risk':      '#FFB6C1',  # 분홍 - 리스크/부정 요인
+}
+
+# 자동 하이라이트 카테고리별 라벨 (UI/로그용)
+AUTO_HIGHLIGHT_CATEGORY_LABELS = {
+    'target':    '목표주가/투자의견',
+    'financial': '실적/재무',
+    'growth':    '성장 동력',
+    'risk':      '리스크',
+}
+
+# 자동 하이라이트 투명도 (수동: 77, 자동은 약간 진하게)
+AUTO_HIGHLIGHT_ALPHA = 100
+
+# 자동 하이라이트 카테고리별 정규식 패턴 (한국 증권 리포트 어휘)
+AUTO_HIGHLIGHT_CATEGORIES = {
+    'target': [
+        r'목표주가\s*[:：]?\s*[\d,]+\s*원',
+        r'적정주가\s*[:：]?\s*[\d,]+\s*원',
+        r'투자의견\s*[:：]?\s*(매수|Buy|BUY|보유|Hold|HOLD|매도|Sell|SELL|중립|Neutral)',
+        r'(상향|하향)\s*조정',
+        r'목표주가\s*(상향|하향)',
+        r'TP\s*[:：]?\s*[\d,]+',
+    ],
+    'financial': [
+        r'(매출액?|영업이익|당기순이익|순이익|EPS|PER|ROE|PBR|EBITDA|영업이익률)\s*[:：은는이가]*\s*[\d,\.]+\s*(원|억원?|조원?|%|배)',
+        r'(YoY|QoQ|전년\s*대비|전분기\s*대비)\s*[+\-]?\s*\d+\.?\d*\s*%',
+        r'[\+\-]?\s*\d+\.?\d*\s*%\s*(증가|감소|성장|하락|상승)',
+    ],
+    'growth': [
+        r'(신사업|신제품|신규\s*고객|수혜|성장\s*동력|모멘텀|점유율\s*(상승|확대)|시장\s*확대|판매\s*호조|수요\s*증가)',
+        r'(역대\s*최대|사상\s*최고|컨센서스\s*상회|기대\s*이상)',
+    ],
+    'risk': [
+        r'(리스크|위험\s*요인|우려|하방|부정적|둔화|역성장|규제\s*(리스크|강화))',
+        r'(컨센서스\s*하회|기대\s*이하|불확실성|악화|부진)',
+    ],
+}
+
 # 창 설정
 WINDOW_TITLE = "네이버 증권 종목 리포트 뷰어"
 WINDOW_GEOMETRY = "1650x1000"
@@ -73,3 +117,11 @@ try:
     PARSER = 'lxml'
 except ImportError:
     PARSER = 'html.parser'
+
+# PDF 다운로드 허용 도메인 목록
+ALLOWED_PDF_DOMAINS = [
+    'ssl.pstatic.net',
+    'stock.pstatic.net',
+    'finance.naver.com',
+    'imgstock.naver.com',
+]
