@@ -102,7 +102,7 @@ AUTO_HIGHLIGHT_CATEGORIES = {
 }
 
 # 창 설정
-WINDOW_TITLE = "네이버 증권 종목 리포트 뷰어"
+WINDOW_TITLE = "JS 네이버 증권 종목 리포트 뷰어"
 WINDOW_GEOMETRY = "1650x1000"
 WINDOW_MIN_SIZE = (1400, 800)
 
