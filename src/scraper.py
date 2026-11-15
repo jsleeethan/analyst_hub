@@ -1,28 +1,31 @@
 """
 웹 크롤링 모듈
-- NaverReportScraper: 네이버 금융 리포트 스크래핑
+- NaverReportScraper: 네이버 금융 리포트 스크래핑 (신규 JSON API 기반)
 """
 
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
-from urllib.parse import urljoin
 from typing import List, Optional, Callable
 
-from .config import (
-    RESEARCH_URL, HTTP_HEADERS, PARSER,
-    MAX_PAGES_TO_FETCH, REQUEST_TIMEOUT
-)
+from .config import HTTP_HEADERS, REQUEST_TIMEOUT
 from .models import ReportData
 
 
+API_BASE = "https://stock.naver.com"
+LIST_ENDPOINT = "/api/stockSecurity/researches/v2/company"
+DETAIL_ENDPOINT = "/api/stockSecurity/researches/v2/company/{nid}/detail-page"
+REPORT_PAGE_URL = "https://stock.naver.com/research/company/{nid}"
+
+
 class NaverReportScraper:
-    """네이버 금융 종목 리포트 스크래퍼"""
+    """네이버 금융 종목 리포트 스크래퍼 (stock.naver.com JSON API)"""
 
     def __init__(self):
-        self.headers = HTTP_HEADERS
         self.session = requests.Session()
-        self.session.headers.update(self.headers)
+        headers = dict(HTTP_HEADERS)
+        headers['Accept'] = 'application/json, text/plain, */*'
+        headers['Referer'] = 'https://stock.naver.com/research/company'
+        self.session.headers.update(headers)
 
     def fetch_reports(self, date: Optional[str] = None,
                       progress_callback: Optional[Callable[[int, int], None]] = None) -> List[ReportData]:
@@ -30,109 +33,109 @@ class NaverReportScraper:
         리포트 목록 가져오기
 
         Args:
-            date: 필터링할 날짜 (yy.mm.dd 형식), None이면 오늘
-            progress_callback: 진행 상황 콜백 (current_page, total_pages)
+            date: 필터링할 날짜 (yyyy-mm-dd 또는 yy.mm.dd 형식). None이면 오늘
+            progress_callback: 진행 상황 콜백 (current, total)
 
         Returns:
             ReportData 리스트
         """
+        today = datetime.now()
         if date is None:
-            date = datetime.now().strftime("%y.%m.%d")
+            start_date = today.strftime("%Y-%m-%d")
+        else:
+            start_date = self._normalize_date(date)
 
-        reports = []
+        reports: List[ReportData] = []
+        index = 0
+        page_size = 50
 
-        for page in range(1, MAX_PAGES_TO_FETCH + 1):
+        while True:
+            params = {
+                'size': page_size,
+                'index': index,
+                'startDate': start_date,
+                'endDate': start_date,
+            }
+
             if progress_callback:
-                progress_callback(page, MAX_PAGES_TO_FETCH)
-
-            url = f"{RESEARCH_URL}company_list.naver?&page={page}"
+                progress_callback(index + 1, index + 1)
 
             try:
-                response = self.session.get(url, timeout=REQUEST_TIMEOUT)
-                response.encoding = 'euc-kr'
+                resp = self.session.get(
+                    API_BASE + LIST_ENDPOINT,
+                    params=params,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except (requests.RequestException, ValueError):
+                break
 
-                soup = BeautifulSoup(response.text, PARSER)
-                table = soup.find('table', class_='type_1')
+            items = data.get('items', []) or []
+            for item in items:
+                report = self._parse_item(item)
+                if report is not None:
+                    reports.append(report)
 
-                if not table:
-                    continue
-
-                rows = table.find_all('tr')
-                found_old_date = False
-
-                for row in rows:
-                    cols = row.find_all('td')
-                    if len(cols) < 6:
-                        continue
-
-                    report = self._parse_report_row(cols)
-                    if report is None:
-                        continue
-
-                    if report.date == date:
-                        reports.append(report)
-                    elif reports and report.date != date:
-                        found_old_date = True
-                        break
-
-                if found_old_date:
-                    break
-
-                # 마지막 행의 날짜 확인
-                if reports and rows:
-                    last_row = rows[-1] if rows else None
-                    if last_row:
-                        cols = last_row.find_all('td')
-                        if len(cols) >= 5:
-                            last_date = cols[4].get_text(strip=True)
-                            if last_date != date:
-                                break
-
-            except requests.RequestException:
-                continue
+            if not data.get('hasNext'):
+                break
+            index += len(items) or page_size
 
         return reports
 
-    def _parse_report_row(self, cols) -> Optional[ReportData]:
-        """테이블 행에서 리포트 정보 파싱"""
+    @staticmethod
+    def _normalize_date(date: str) -> str:
+        """다양한 날짜 포맷을 yyyy-mm-dd 로 정규화"""
+        date = date.strip()
+        for fmt in ("%Y-%m-%d", "%y.%m.%d", "%Y.%m.%d"):
+            try:
+                return datetime.strptime(date, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return date
+
+    @staticmethod
+    def _display_date(iso_date: str) -> str:
+        """yyyy-mm-dd → yy.mm.dd"""
         try:
-            stock_link = cols[0].find('a')
-            if not stock_link:
+            return datetime.strptime(iso_date, "%Y-%m-%d").strftime("%y.%m.%d")
+        except (ValueError, TypeError):
+            return iso_date or ""
+
+    @staticmethod
+    def _format_price(value) -> str:
+        """목표가 포맷팅 (천 단위 콤마)"""
+        if not value:
+            return "-"
+        try:
+            return f"{int(value):,}"
+        except (ValueError, TypeError):
+            return str(value)
+
+    def _parse_item(self, item: dict) -> Optional[ReportData]:
+        """API 응답의 리포트 항목 파싱"""
+        try:
+            nid = item.get('nid')
+            if not nid:
                 return None
-            stock_name = stock_link.get_text(strip=True)
-
-            title_link = cols[1].find('a')
-            if not title_link:
-                return None
-            title = title_link.get_text(strip=True)
-            report_link = urljoin(RESEARCH_URL, title_link.get('href', ''))
-
-            firm = cols[2].get_text(strip=True)
-
-            pdf_link_tag = cols[3].find('a')
-            pdf_link = ""
-            if pdf_link_tag:
-                pdf_link = pdf_link_tag.get('href', '')
-
-            date = cols[4].get_text(strip=True)
-            views = cols[5].get_text(strip=True)
 
             return ReportData(
-                stock=stock_name,
-                title=title,
-                firm=firm,
-                date=date,
-                link=report_link,
-                pdf_link=pdf_link,
-                views=views,
+                stock=item.get('itemName', ''),
+                title=item.get('title', ''),
+                firm=item.get('brokerName', ''),
+                date=self._display_date(item.get('writeDate', '')),
+                link=REPORT_PAGE_URL.format(nid=nid),
+                pdf_link="",  # 상세 조회 시 채워짐
+                views=str(item.get('readCount', '0')),
+                opinion=item.get('opinionText') or "-",
+                target=self._format_price(item.get('goalPrice')),
             )
-
         except Exception:
             return None
 
     def fetch_report_meta(self, report: ReportData) -> ReportData:
         """
-        리포트 상세 정보 가져오기 (투자의견, 목표가)
+        리포트 상세 정보 가져오기 (PDF 링크, 투자의견, 목표가)
 
         Args:
             report: ReportData 객체
@@ -140,30 +143,42 @@ class NaverReportScraper:
         Returns:
             업데이트된 ReportData 객체
         """
+        nid = self._extract_nid(report.link)
+        if not nid:
+            return report
+
         try:
-            response = self.session.get(report.link, timeout=REQUEST_TIMEOUT)
-            response.encoding = 'euc-kr'
+            resp = self.session.get(
+                API_BASE + DETAIL_ENDPOINT.format(nid=nid),
+                timeout=REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except (requests.RequestException, ValueError):
+            return report
 
-            soup = BeautifulSoup(response.text, PARSER)
+        content = data.get('researchContent') or {}
 
-            table = soup.find('table', class_='view_type_1')
-            if table:
-                rows = table.find_all('tr')
-                for row in rows:
-                    th = row.find('th')
-                    td = row.find('td')
-                    if th and td:
-                        label = th.get_text(strip=True)
-                        value = td.get_text(strip=True)
-                        if '투자의견' in label:
-                            report.opinion = value
-                        elif '목표주가' in label or '목표가' in label:
-                            report.target = value
+        attach_url = content.get('attachUrl')
+        if attach_url:
+            report.pdf_link = attach_url
 
-        except requests.RequestException:
-            pass
+        opinion = content.get('opinionText')
+        if opinion:
+            report.opinion = opinion
+
+        goal = content.get('goalPrice')
+        if goal:
+            report.target = self._format_price(goal)
 
         return report
+
+    @staticmethod
+    def _extract_nid(link: str) -> str:
+        """리포트 상세 페이지 URL에서 nid 추출"""
+        if not link:
+            return ""
+        return link.rstrip('/').rsplit('/', 1)[-1]
 
     def close(self):
         """세션 종료"""

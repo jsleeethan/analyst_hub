@@ -29,11 +29,17 @@ class PDFHandler:
     """PDF 처리 클래스"""
 
     def __init__(self):
-        self.images: List = []  # PIL Image 리스트
+        self._doc = None  # fitz.Document (lazy rendering용)
+        self._pdf_data = None  # BytesIO (doc이 참조하므로 유지)
         self.total_pages: int = 0
         self.current_page: int = 0
         self.zoom_level: float = 1.0
         self.annotations: Dict[int, List[dict]] = {}  # {page_num: [annotation_dict, ...]}
+
+    @property
+    def is_loaded(self) -> bool:
+        """PDF가 로드되어 있는지 여부"""
+        return self._doc is not None and self.total_pages > 0
 
     @staticmethod
     def is_supported() -> bool:
@@ -42,7 +48,7 @@ class PDFHandler:
 
     def load_pdf(self, pdf_url: str) -> bool:
         """
-        PDF 다운로드 및 로드
+        PDF 다운로드 및 로드 (lazy rendering - 페이지를 미리 렌더링하지 않음)
 
         Args:
             pdf_url: PDF URL
@@ -54,6 +60,9 @@ class PDFHandler:
             return False
 
         try:
+            # 기존 문서 정리
+            self._close_doc()
+
             response = requests.get(
                 pdf_url,
                 headers=HTTP_HEADERS,
@@ -63,34 +72,45 @@ class PDFHandler:
             if response.status_code != 200:
                 raise Exception(f"PDF 다운로드 실패: {response.status_code}")
 
-            pdf_data = BytesIO(response.content)
-            doc = fitz.open(stream=pdf_data, filetype="pdf")
+            self._pdf_data = BytesIO(response.content)
+            self._doc = fitz.open(stream=self._pdf_data, filetype="pdf")
 
-            self.total_pages = len(doc)
+            self.total_pages = len(self._doc)
             self.current_page = 0
             self.zoom_level = 1.0
-            self.images = []
             self.annotations = {}
 
-            # 모든 페이지 렌더링
-            for page_num in range(self.total_pages):
-                page = doc[page_num]
-                mat = fitz.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE)
-                pix = page.get_pixmap(matrix=mat)
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                self.images.append(img)
-
-            doc.close()
             return True
 
         except Exception as e:
+            self._close_doc()
             raise e
+
+    def _close_doc(self):
+        """내부: fitz 문서 닫기"""
+        if self._doc is not None:
+            try:
+                self._doc.close()
+            except Exception:
+                pass
+            self._doc = None
+            self._pdf_data = None
+
+    def _render_page_image(self, page_num: int) -> Optional['Image.Image']:
+        """내부: 문서에서 단일 페이지를 PIL Image로 렌더링"""
+        if self._doc is None or page_num < 0 or page_num >= self.total_pages:
+            return None
+        page = self._doc[page_num]
+        mat = fitz.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE)
+        pix = page.get_pixmap(matrix=mat)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        return img
 
     def render_page(self, page_num: Optional[int] = None,
                     zoom: Optional[float] = None,
                     apply_annotations: bool = True) -> Optional['Image.Image']:
         """
-        페이지 렌더링
+        페이지 렌더링 (on-demand: 요청 시점에 해당 페이지만 렌더링)
 
         Args:
             page_num: 페이지 번호 (None이면 현재 페이지)
@@ -100,7 +120,7 @@ class PDFHandler:
         Returns:
             렌더링된 PIL Image
         """
-        if not self.images:
+        if not self.is_loaded:
             return None
 
         if page_num is None:
@@ -109,10 +129,9 @@ class PDFHandler:
         if zoom is None:
             zoom = self.zoom_level
 
-        if page_num < 0 or page_num >= len(self.images):
+        img = self._render_page_image(page_num)
+        if img is None:
             return None
-
-        img = self.images[page_num].copy()
 
         # 줌 적용
         new_width = int(img.width * zoom)
@@ -280,7 +299,7 @@ class PDFHandler:
 
     def reset(self):
         """상태 초기화"""
-        self.images = []
+        self._close_doc()
         self.total_pages = 0
         self.current_page = 0
         self.zoom_level = 1.0

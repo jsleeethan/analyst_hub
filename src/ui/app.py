@@ -215,13 +215,9 @@ class NaverReportViewerApp:
 
         # UI 업데이트
         self.pdf_viewer.update_report_info(self.current_report)
+        self.pdf_viewer.show_loading()
 
-        if self.current_report.pdf_link:
-            self._load_pdf()
-        else:
-            self.pdf_viewer.show_no_pdf()
-
-        # 상세 정보 로드
+        # 상세 정보 로드 (PDF 링크 포함) → 완료 후 PDF 로드
         self._load_report_meta()
 
     def _on_report_double_click(self, idx: int):
@@ -241,10 +237,17 @@ class NaverReportViewerApp:
             self.root.after(0, self._update_meta_labels)
 
     def _update_meta_labels(self):
-        """메타 정보 업데이트"""
-        if self.current_report:
-            self.pdf_viewer.meta_labels['opinion'].configure(text=self.current_report.opinion)
-            self.pdf_viewer.meta_labels['target'].configure(text=self.current_report.target)
+        """메타 정보 업데이트 + PDF 로드"""
+        if not self.current_report:
+            return
+
+        self.pdf_viewer.meta_labels['opinion'].configure(text=self.current_report.opinion)
+        self.pdf_viewer.meta_labels['target'].configure(text=self.current_report.target)
+
+        if self.current_report.pdf_link:
+            self._load_pdf()
+        else:
+            self.pdf_viewer.show_no_pdf()
 
     def _load_pdf(self):
         """PDF 로드"""
@@ -324,7 +327,7 @@ class NaverReportViewerApp:
 
     def _on_mouse_press(self, x: float, y: float):
         """마우스 버튼 누름"""
-        if not self.pdf_handler.images:
+        if not self.pdf_handler.is_loaded:
             return
 
         tool = self.annotation_toolbar.current_tool
@@ -485,7 +488,7 @@ class NaverReportViewerApp:
 
     def _capture_pdf_view(self):
         """현재 PDF 뷰어 화면 캡쳐"""
-        if not self.pdf_handler.images:
+        if not self.pdf_handler.is_loaded:
             messagebox.showwarning("알림", "캡쳐할 PDF가 없습니다.")
             return
 
